@@ -368,98 +368,169 @@
     });
   }
 
-  /* ============ Diccionario de libros y buscador de usuarios ============ */
+  const BOOK_MODAL_PAGE_SIZE = 25;
+  let bookModalLetter = 'ALL';
+  let bookModalPage = 1;
+  let bookModalSearchTerm = '';
+  let bookPickerModalEl = null;
 
-  function setBubbleLetter(letter, count) {
-    if (!letter) return;
-    const color = colorForLetter(letter);
-    loanBookDropdown.style.setProperty('--dict-color', color);
-    if (currentActiveLetter !== letter) {
-      currentActiveLetter = letter;
-      loanBookBubbleLetter.textContent = letter;
-      loanBookBubbleLetter.classList.remove('is-pop');
-      void loanBookBubbleLetter.offsetWidth;
-      loanBookBubbleLetter.classList.add('is-pop');
-    }
-    if (typeof count === 'number') {
-      loanBookBubbleCount.textContent = `${count} ${count === 1 ? 'libro' : 'libros'}`;
-    }
-    loanBookIndex.querySelectorAll('button').forEach(btn => {
-      btn.classList.toggle('is-active', btn.dataset.letter === letter);
+  function ensureBookPickerModal() {
+    if (bookPickerModalEl) return bookPickerModalEl;
+
+    const el = document.createElement('div');
+    el.id = 'bookPickerModal';
+    el.className = 'book-picker-modal';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="book-picker-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="bookPickerTitle">
+        <div class="book-picker-modal__header">
+          <div>
+            <h4 id="bookPickerTitle">Seleccionar libro disponible</h4>
+            <p id="bookPickerSubtitle"></p>
+          </div>
+          <button type="button" id="bookPickerClose" class="book-picker-modal__close" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="book-picker-modal__search">
+          <input type="text" id="bookPickerInput" placeholder="Buscar por título, autor o ISBN...">
+        </div>
+        <div id="bookPickerAlpha" class="book-picker-modal__alpha"></div>
+        <div id="bookPickerList" class="book-picker-modal__list"></div>
+        <div class="book-picker-modal__footer">
+          <span id="bookPickerInfo"></span>
+          <div class="book-picker-modal__pager">
+            <button type="button" id="bookPickerPrev">Anterior</button>
+            <span id="bookPickerPageLabel"></span>
+            <button type="button" id="bookPickerNext">Siguiente</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(el);
+    bookPickerModalEl = el;
+
+    document.getElementById('bookPickerClose').addEventListener('click', closeBookPickerModal);
+    el.addEventListener('click', (e) => { if (e.target === el) closeBookPickerModal(); });
+
+    document.getElementById('bookPickerInput').addEventListener('input', (e) => {
+      bookModalSearchTerm = e.target.value;
+      bookModalPage = 1;
+      renderBookPickerModal();
+    });
+
+    document.getElementById('bookPickerPrev').addEventListener('click', () => {
+      if (bookModalPage > 1) {
+        bookModalPage--;
+        renderBookPickerModal();
+      }
+    });
+
+    document.getElementById('bookPickerNext').addEventListener('click', () => {
+      bookModalPage++;
+      renderBookPickerModal();
+    });
+
+    return el;
+  }
+
+  function getFilteredBooksForModal() {
+    const q = normalizeText(bookModalSearchTerm).trim();
+    return ALL_AVAILABLE_BOOKS.filter(b => {
+      const letter = firstGroupLetter(b.title);
+      const matchesLetter = bookModalLetter === 'ALL' || letter === bookModalLetter;
+      if (!matchesLetter) return false;
+      if (!q) return true;
+      return (
+        normalizeText(b.title).includes(q) ||
+        normalizeText(b.author).includes(q) ||
+        normalizeText(b.isbn).includes(q)
+      );
     });
   }
 
-  function renderBookDictionary(filterTerm = '') {
-    const q = normalizeText(filterTerm).trim();
-    const filtered = q
-      ? ALL_AVAILABLE_BOOKS.filter(b =>
-          normalizeText(b.title).includes(q) ||
-          normalizeText(b.author).includes(q) ||
-          normalizeText(b.isbn).includes(q)
-        )
-      : ALL_AVAILABLE_BOOKS;
+  function renderBookPickerModal() {
+    const lettersInCatalog = new Set(ALL_AVAILABLE_BOOKS.map(b => firstGroupLetter(b.title)));
+    const alphaList = ['ALL', '#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+    const alphaEl = document.getElementById('bookPickerAlpha');
 
-    if (!filtered.length) {
-      loanBookList.innerHTML = `<div class="book-dict-empty">No se encontraron libros disponibles con "${escapeHtml(filterTerm)}".</div>`;
-      loanBookIndex.innerHTML = '';
-      loanBookBubbleCount.textContent = '0 libros';
+    alphaEl.innerHTML = alphaList.map(l => {
+      const label = l === 'ALL' ? 'Todos' : l;
+      const enabled = l === 'ALL' || lettersInCatalog.has(l);
+      const active = bookModalLetter === l;
+      return `<button type="button" class="${active ? 'is-active' : ''}" data-letter="${l}" ${enabled ? '' : 'disabled'}>${label}</button>`;
+    }).join('');
+
+    alphaEl.querySelectorAll('button:not(:disabled)').forEach(btn => {
+      btn.addEventListener('click', () => {
+        bookModalLetter = btn.dataset.letter;
+        bookModalPage = 1;
+        renderBookPickerModal();
+      });
+    });
+
+    const filtered = getFilteredBooksForModal();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / BOOK_MODAL_PAGE_SIZE));
+    if (bookModalPage > totalPages) bookModalPage = totalPages;
+
+    const startIdx = (bookModalPage - 1) * BOOK_MODAL_PAGE_SIZE;
+    const pageItems = filtered.slice(startIdx, startIdx + BOOK_MODAL_PAGE_SIZE);
+
+    const activeColor = bookModalLetter !== 'ALL' ? colorForLetter(bookModalLetter) : '#4A1942';
+    document.getElementById('bookPickerSubtitle').textContent =
+      `${ALL_AVAILABLE_BOOKS.length.toLocaleString('es-CO')} libros disponibles en catálogo`;
+    document.getElementById('bookPickerInfo').textContent = filtered.length
+      ? `Mostrando ${startIdx + 1}–${startIdx + pageItems.length} de ${filtered.length.toLocaleString('es-CO')}`
+      : '0 resultados';
+    document.getElementById('bookPickerPageLabel').textContent = `Página ${bookModalPage} de ${totalPages}`;
+    document.getElementById('bookPickerPrev').disabled = bookModalPage <= 1;
+    document.getElementById('bookPickerNext').disabled = bookModalPage >= totalPages;
+
+    const listEl = document.getElementById('bookPickerList');
+    if (!pageItems.length) {
+      listEl.innerHTML = `<div class="book-dict-empty">No hay libros que coincidan con el filtro.</div>`;
       return;
     }
 
-    const groups = new Map();
-    filtered.forEach(book => {
-      const letter = firstGroupLetter(book.title);
-      if (!groups.has(letter)) groups.set(letter, []);
-      groups.get(letter).push(book);
-    });
-
-    const letters = [...groups.keys()];
-    loanBookList.innerHTML = letters.map(letter => {
-      const color = colorForLetter(letter);
-      const itemsHtml = groups.get(letter).map(b => `
-        <button type="button" class="book-dict-item ${loanBookHidden.value === b.id ? 'is-selected' : ''}" data-id="${b.id}" data-title="${escapeHtml(b.title)} — ${escapeHtml(b.author)}">
-          <strong>${escapeHtml(b.title)}</strong>
-          <span>${escapeHtml(b.author)}${b.isbn ? ' · ISBN ' + escapeHtml(b.isbn) : ''}</span>
-        </button>
-      `).join('');
-
+    listEl.innerHTML = pageItems.map(b => {
+      const letter = firstGroupLetter(b.title);
+      const badgeColor = colorForLetter(letter);
+      const selected = loanBookHidden.value === b.id;
       return `
-        <div class="book-dict-section" data-letter="${letter}" style="--sec-color:${color}">
-          <div class="book-dict-section-header">
-            <span class="book-dict-section-pill">${letter}</span>
-            <span>Sección ${letter} (${groups.get(letter).length})</span>
+        <button type="button" class="book-picker-modal__item ${selected ? 'is-selected' : ''}" data-id="${b.id}" data-title="${escapeHtml(b.title)} — ${escapeHtml(b.author)}">
+          <span class="book-picker-modal__badge" style="background:${badgeColor}">${letter}</span>
+          <div class="book-picker-modal__meta">
+            <strong>${escapeHtml(b.title)}</strong>
+            <span>${escapeHtml(b.author)}${b.isbn ? ' · ISBN ' + escapeHtml(b.isbn) : ''}</span>
           </div>
-          ${itemsHtml}
-        </div>
+        </button>
       `;
     }).join('');
 
-    const alphabet = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
-    loanBookIndex.innerHTML = alphabet.map(l => {
-      const hasItems = groups.has(l);
-      return `<button type="button" data-letter="${l}" ${hasItems ? '' : 'disabled'}>${l}</button>`;
-    }).join('');
-
-    loanBookIndex.querySelectorAll('button:not(:disabled)').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const target = loanBookList.querySelector(`.book-dict-section[data-letter="${btn.dataset.letter}"]`);
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          setBubbleLetter(btn.dataset.letter, filtered.length);
-        }
-      });
-    });
-
-    loanBookList.querySelectorAll('.book-dict-item').forEach(btn => {
+    listEl.querySelectorAll('.book-picker-modal__item').forEach(btn => {
       btn.addEventListener('click', () => {
         loanBookHidden.value = btn.dataset.id;
         loanBookSearch.value = btn.dataset.title;
-        loanBookDropdown.hidden = true;
+        closeBookPickerModal();
       });
     });
 
-    currentActiveLetter = '';
-    setBubbleLetter(letters[0], filtered.length);
+    listEl.scrollTop = 0;
+    document.querySelector('.book-picker-modal__dialog').style.setProperty('--picker-accent', activeColor);
+  }
+
+  function openBookPickerModal(initialTerm = '') {
+    ensureBookPickerModal();
+    bookModalLetter = 'ALL';
+    bookModalPage = 1;
+    bookModalSearchTerm = loanBookHidden.value ? '' : initialTerm;
+    const input = document.getElementById('bookPickerInput');
+    input.value = bookModalSearchTerm;
+    renderBookPickerModal();
+    bookPickerModalEl.hidden = false;
+    input.focus();
+  }
+
+  function closeBookPickerModal() {
+    if (bookPickerModalEl) bookPickerModalEl.hidden = true;
   }
 
   function renderMemberList(filterTerm = '') {
@@ -495,41 +566,16 @@
     });
   }
 
-
   function initPickerEvents() {
-    loanBookList.addEventListener('scroll', () => {
-      if (scrollRafId) return;
-      scrollRafId = requestAnimationFrame(() => {
-        scrollRafId = null;
-        const sections = loanBookList.querySelectorAll('.book-dict-section');
-        const containerTop = loanBookList.getBoundingClientRect().top;
-        let active = null;
-        for (const sec of sections) {
-          if (sec.getBoundingClientRect().top - containerTop <= 36) {
-            active = sec.dataset.letter;
-          } else {
-            break;
-          }
-        }
-        if (active) setBubbleLetter(active);
-      });
-    }, { passive: true });
+    if (loanBookDropdown) loanBookDropdown.hidden = true;
 
-    loanBookSearch.addEventListener('focus', () => {
-      loanBookDropdown.hidden = false;
-      loanMemberDropdown.hidden = true;
-      renderBookDictionary(loanBookHidden.value ? '' : loanBookSearch.value);
-    });
-
-    loanBookSearch.addEventListener('input', () => {
-      loanBookHidden.value = '';
-      loanBookDropdown.hidden = false;
-      renderBookDictionary(loanBookSearch.value);
-    });
+    loanBookSearch.readOnly = true;
+    loanBookSearch.style.cursor = 'pointer';
+    loanBookSearch.addEventListener('click', () => openBookPickerModal(''));
+    loanBookSearch.addEventListener('focus', () => openBookPickerModal(''));
 
     loanMemberSearch.addEventListener('focus', () => {
       loanMemberDropdown.hidden = false;
-      loanBookDropdown.hidden = true;
       renderMemberList(loanMemberHidden.value ? '' : loanMemberSearch.value);
     });
 
@@ -540,9 +586,6 @@
     });
 
     document.addEventListener('click', (e) => {
-      if (!document.getElementById('loanBookPicker').contains(e.target)) {
-        loanBookDropdown.hidden = true;
-      }
       if (!document.getElementById('loanMemberPicker').contains(e.target)) {
         loanMemberDropdown.hidden = true;
       }
@@ -727,9 +770,9 @@
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (!returnLoanModal.hidden) closeReturnModal();
-    else if (!loanModal.hidden) closeLoanModal();
+    if (bookPickerModalEl && !bookPickerModalEl.hidden) closeBookPickerModal();
+      else if (!returnLoanModal.hidden) closeReturnModal();
+      else if (!loanModal.hidden) closeLoanModal();
   });
 
   /* ============ Cerrar sesión ============ */
