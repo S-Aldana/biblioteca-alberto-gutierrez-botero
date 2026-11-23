@@ -56,7 +56,25 @@
       return data.total;
     },
     async books() {
-      return window.BAGBApi.apiFetch('/books?page=1&page_size=10000&status=disponible');
+      const pageSize = 100;
+      let page = 1;
+      let all = [];
+
+      while (true) {
+        const res = await window.BAGBApi.apiFetch(
+          `/books?page=${page}&page_size=${pageSize}&status=disponible`
+        );
+        const batch = Array.isArray(res) ? res : (res.data ?? res.items ?? []);
+        all = all.concat(batch);
+
+        const total = typeof res.total === 'number' ? res.total : null;
+        if (batch.length === 0) break;
+        if (total !== null && all.length >= total) break;
+        if (total === null && batch.length < pageSize) break;
+        page++;
+      }
+
+      return { data: all };
     },
     async members() {
       return window.BAGBApi.apiFetch('/members?page=1&page_size=10000');
