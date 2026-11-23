@@ -255,12 +255,50 @@
 
       <div class="form-row">
         <div class="form-field">
-          <label for="loanBook">Libro *</label>
-          <select id="loanBook" required></select>
+          <label for="loanBookSearch">Libro *</label>
+          <div class="book-dict-picker" id="loanBookPicker">
+            <input
+              type="text"
+              id="loanBookSearch"
+              placeholder="Escribe título o autor (ej. El lobo)…"
+              autocomplete="off"
+              role="combobox"
+              aria-expanded="false"
+              aria-controls="loanBookList"
+            >
+            <input type="hidden" id="loanBook" required>
+
+            <div class="book-dict-dropdown" id="loanBookDropdown" hidden>
+              <!-- Burbuja indicadora de letra activa -->
+              <div class="book-dict-bubble" id="loanBookBubble" aria-hidden="true">
+                <span class="book-dict-bubble__letter" id="loanBookBubbleLetter">A</span>
+                <span class="book-dict-bubble__count" id="loanBookBubbleCount">0 libros</span>
+              </div>
+
+              <div class="book-dict-body">
+                <!-- Lista con secciones por letra -->
+                <div class="book-dict-list" id="loanBookList" role="listbox"></div>
+                <!-- Barra alfabética A-Z tipo diccionario -->
+                <div class="book-dict-index" id="loanBookIndex" aria-label="Índice alfabético"></div>
+              </div>
+            </div>
+          </div>
         </div>
+
         <div class="form-field">
-          <label for="loanMember">Usuario *</label>
-          <select id="loanMember" required></select>
+          <label for="loanMemberSearch">Usuario *</label>
+          <div class="book-dict-picker" id="loanMemberPicker">
+            <input
+              type="text"
+              id="loanMemberSearch"
+              placeholder="Escribe nombre o documento…"
+              autocomplete="off"
+            >
+            <input type="hidden" id="loanMember" required>
+            <div class="book-dict-dropdown book-dict-dropdown--simple" id="loanMemberDropdown" hidden>
+              <div class="book-dict-list" id="loanMemberList"></div>
+            </div>
+          </div>
         </div>
       </div>
 

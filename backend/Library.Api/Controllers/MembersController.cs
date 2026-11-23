@@ -45,7 +45,7 @@ public class MembersController(LibraryDbContext db) : ControllerBase
         }
 
         page = page < 1 ? 1 : page;
-        pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
+        pageSize = pageSize is < 1 or > 10000 ? 20 : pageSize;
 
         var query = db.Members.AsQueryable();
 

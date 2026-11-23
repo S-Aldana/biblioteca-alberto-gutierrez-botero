@@ -19,6 +19,11 @@
   const STATUS_API_LABEL = { prestado: 'Activo', devuelto: 'Devuelto', vencido: 'Vencido' };
   const STATUS_API_CLASS = { prestado: 'activo', devuelto: 'devuelto', vencido: 'vencido' };
 
+  const LETTER_COLORS = [
+    '#4A1942', '#F4791E', '#1E8E3E', '#3E6FE0',
+    '#8E24AA', '#D84315', '#00838F', '#6D4C41'
+  ];
+
   let LOANS = [];         // solo los préstamos de la página actual
   let currentPage = 1;
   let currentPageSize = PAGE_SIZE_OPTIONS_DEFAULT;
@@ -27,6 +32,10 @@
   let filterStatus = '';  // valor de #filterStatus: '', 'activo', 'devuelto', 'vencido'
   let loadRequestId = 0;
   let returningLoanId = null;
+
+  let ALL_AVAILABLE_BOOKS = [];
+  let ALL_MEMBERS = [];
+  let currentActiveLetter = '';
 
   /* ============ API — apiFetch agrega el token y parsea errores ============ */
 
@@ -45,10 +54,10 @@
       return data.total;
     },
     async books() {
-      return window.BAGBApi.apiFetch('/books?page=1&page_size=100');
+      return window.BAGBApi.apiFetch('/books?page=1&page_size=10000&status=disponible');
     },
     async members() {
-      return window.BAGBApi.apiFetch('/members?page=1&page_size=100');
+      return window.BAGBApi.apiFetch('/members?page=1&page_size=10000');
     },
     async create(payload) {
       return window.BAGBApi.apiFetch('/loans', { method: 'POST', body: payload });
@@ -85,6 +94,24 @@
     return { from: iso(first), to: iso(last) };
   }
 
+  function colorForLetter(letter) {
+    const code = letter.charCodeAt(0) || 65;
+    return LETTER_COLORS[code % LETTER_COLORS.length];
+  }
+
+  function normalizeText(str) {
+    return String(str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function firstGroupLetter(title) {
+    const clean = normalizeText(title).trim().toUpperCase();
+    const ch = clean.charAt(0);
+    return /^[A-ZÑ]$/.test(ch) ? ch : '#';
+  }
+
   /* ============ Referencias DOM ============ */
 
   const tbody = document.getElementById('loansTableBody');
@@ -104,8 +131,19 @@
   const loanModal = document.getElementById('loanModal');
   const loanForm = document.getElementById('loanForm');
   const loanFormError = document.getElementById('loanFormError');
-  const loanBookSelect = document.getElementById('loanBook');
-  const loanMemberSelect = document.getElementById('loanMember');
+
+  const loanBookHidden = document.getElementById('loanBook');
+  const loanBookSearch = document.getElementById('loanBookSearch');
+  const loanBookDropdown = document.getElementById('loanBookDropdown');
+  const loanBookList = document.getElementById('loanBookList');
+  const loanBookIndex = document.getElementById('loanBookIndex');
+  const loanBookBubbleLetter = document.getElementById('loanBookBubbleLetter');
+  const loanBookBubbleCount = document.getElementById('loanBookBubbleCount');
+
+  const loanMemberHidden = document.getElementById('loanMember');
+  const loanMemberSearch = document.getElementById('loanMemberSearch');
+  const loanMemberDropdown = document.getElementById('loanMemberDropdown');
+  const loanMemberList = document.getElementById('loanMemberList');
 
   const returnLoanModal = document.getElementById('returnLoanModal');
   const returnLoanForm = document.getElementById('returnLoanForm');
@@ -328,6 +366,182 @@
     });
   }
 
+  /* ============ Diccionario de libros y buscador de usuarios ============ */
+
+  function setBubbleLetter(letter, count) {
+    if (!letter) return;
+    const color = colorForLetter(letter);
+    loanBookDropdown.style.setProperty('--dict-color', color);
+    if (currentActiveLetter !== letter) {
+      currentActiveLetter = letter;
+      loanBookBubbleLetter.textContent = letter;
+      loanBookBubbleLetter.classList.remove('is-pop');
+      void loanBookBubbleLetter.offsetWidth;
+      loanBookBubbleLetter.classList.add('is-pop');
+    }
+    if (typeof count === 'number') {
+      loanBookBubbleCount.textContent = `${count} ${count === 1 ? 'libro' : 'libros'}`;
+    }
+    loanBookIndex.querySelectorAll('button').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.letter === letter);
+    });
+  }
+
+  function renderBookDictionary(filterTerm = '') {
+    const q = normalizeText(filterTerm).trim();
+    const filtered = q
+      ? ALL_AVAILABLE_BOOKS.filter(b =>
+          normalizeText(b.title).includes(q) ||
+          normalizeText(b.author).includes(q) ||
+          normalizeText(b.isbn).includes(q)
+        )
+      : ALL_AVAILABLE_BOOKS;
+
+    if (!filtered.length) {
+      loanBookList.innerHTML = `<div class="book-dict-empty">No se encontraron libros disponibles con "${escapeHtml(filterTerm)}".</div>`;
+      loanBookIndex.innerHTML = '';
+      loanBookBubbleCount.textContent = '0 libros';
+      return;
+    }
+
+    const groups = new Map();
+    filtered.forEach(book => {
+      const letter = firstGroupLetter(book.title);
+      if (!groups.has(letter)) groups.set(letter, []);
+      groups.get(letter).push(book);
+    });
+
+    const letters = [...groups.keys()];
+    loanBookList.innerHTML = letters.map(letter => {
+      const color = colorForLetter(letter);
+      const itemsHtml = groups.get(letter).map(b => `
+        <button type="button" class="book-dict-item ${loanBookHidden.value === b.id ? 'is-selected' : ''}" data-id="${b.id}" data-title="${escapeHtml(b.title)} — ${escapeHtml(b.author)}">
+          <strong>${escapeHtml(b.title)}</strong>
+          <span>${escapeHtml(b.author)}${b.isbn ? ' · ISBN ' + escapeHtml(b.isbn) : ''}</span>
+        </button>
+      `).join('');
+
+      return `
+        <div class="book-dict-section" data-letter="${letter}" style="--sec-color:${color}">
+          <div class="book-dict-section-header">
+            <span class="book-dict-section-pill">${letter}</span>
+            <span>Sección ${letter} (${groups.get(letter).length})</span>
+          </div>
+          ${itemsHtml}
+        </div>
+      `;
+    }).join('');
+
+    const alphabet = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+    loanBookIndex.innerHTML = alphabet.map(l => {
+      const hasItems = groups.has(l);
+      return `<button type="button" data-letter="${l}" ${hasItems ? '' : 'disabled'}>${l}</button>`;
+    }).join('');
+
+    loanBookIndex.querySelectorAll('button:not(:disabled)').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = loanBookList.querySelector(`.book-dict-section[data-letter="${btn.dataset.letter}"]`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          setBubbleLetter(btn.dataset.letter, filtered.length);
+        }
+      });
+    });
+
+    loanBookList.querySelectorAll('.book-dict-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        loanBookHidden.value = btn.dataset.id;
+        loanBookSearch.value = btn.dataset.title;
+        loanBookDropdown.hidden = true;
+      });
+    });
+
+    currentActiveLetter = '';
+    setBubbleLetter(letters[0], filtered.length);
+  }
+
+  function renderMemberList(filterTerm = '') {
+    const q = normalizeText(filterTerm).trim();
+    const filtered = q
+      ? ALL_MEMBERS.filter(m =>
+          normalizeText(`${m.first_name} ${m.last_name}`).includes(q) ||
+          normalizeText(m.document_number).includes(q)
+        )
+      : ALL_MEMBERS;
+
+    if (!filtered.length) {
+      loanMemberList.innerHTML = `<div class="book-dict-empty">No se encontraron afiliados.</div>`;
+      return;
+    }
+
+    loanMemberList.innerHTML = filtered.map(m => {
+      const fullLabel = `${m.first_name} ${m.last_name} — ${m.document_type} ${m.document_number}`;
+      return `
+        <button type="button" class="book-dict-item ${loanMemberHidden.value === m.id ? 'is-selected' : ''}" data-id="${m.id}" data-label="${escapeHtml(fullLabel)}">
+          <strong>${escapeHtml(m.first_name)} ${escapeHtml(m.last_name)}</strong>
+          <span>${escapeHtml(m.document_type)} ${escapeHtml(m.document_number)}</span>
+        </button>
+      `;
+    }).join('');
+
+    loanMemberList.querySelectorAll('.book-dict-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        loanMemberHidden.value = btn.dataset.id;
+        loanMemberSearch.value = btn.dataset.label;
+        loanMemberDropdown.hidden = true;
+      });
+    });
+  }
+
+  function initPickerEvents() {
+    loanBookList.addEventListener('scroll', () => {
+      const sections = loanBookList.querySelectorAll('.book-dict-section');
+      const containerTop = loanBookList.getBoundingClientRect().top;
+      let active = null;
+      for (const sec of sections) {
+        if (sec.getBoundingClientRect().top - containerTop <= 28) {
+          active = sec.dataset.letter;
+        } else {
+          break;
+        }
+      }
+      if (active) setBubbleLetter(active);
+    });
+
+    loanBookSearch.addEventListener('focus', () => {
+      loanBookDropdown.hidden = false;
+      loanMemberDropdown.hidden = true;
+      renderBookDictionary(loanBookHidden.value ? '' : loanBookSearch.value);
+    });
+
+    loanBookSearch.addEventListener('input', () => {
+      loanBookHidden.value = '';
+      loanBookDropdown.hidden = false;
+      renderBookDictionary(loanBookSearch.value);
+    });
+
+    loanMemberSearch.addEventListener('focus', () => {
+      loanMemberDropdown.hidden = false;
+      loanBookDropdown.hidden = true;
+      renderMemberList(loanMemberHidden.value ? '' : loanMemberSearch.value);
+    });
+
+    loanMemberSearch.addEventListener('input', () => {
+      loanMemberHidden.value = '';
+      loanMemberDropdown.hidden = false;
+      renderMemberList(loanMemberSearch.value);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!document.getElementById('loanBookPicker').contains(e.target)) {
+        loanBookDropdown.hidden = true;
+      }
+      if (!document.getElementById('loanMemberPicker').contains(e.target)) {
+        loanMemberDropdown.hidden = true;
+      }
+    });
+  }
+
   /* ============ Modal: registrar préstamo (POST /loans) ============ */
 
   function hideLoanFormError() {
@@ -341,40 +555,52 @@
   }
 
   async function populateLoanFormSelects() {
-    loanBookSelect.innerHTML = '<option value="">Cargando libros…</option>';
-    loanMemberSelect.innerHTML = '<option value="">Cargando usuarios…</option>';
+    loanBookHidden.value = '';
+    loanBookSearch.value = '';
+    loanBookSearch.placeholder = 'Cargando libros…';
+
+    loanMemberHidden.value = '';
+    loanMemberSearch.value = '';
+    loanMemberSearch.placeholder = 'Cargando usuarios…';
 
     const [booksResult, membersResult] = await Promise.allSettled([api.books(), api.members()]);
 
     if (booksResult.status === 'fulfilled') {
-      const available = booksResult.value.data
+      ALL_AVAILABLE_BOOKS = booksResult.value.data
         .filter(b => b.status === 'disponible')
-        .sort((a, b) => a.title.localeCompare(b.title));
-      loanBookSelect.innerHTML = available.length
-        ? available.map(b => `<option value="${b.id}">${escapeHtml(b.title)} — ${escapeHtml(b.author)}</option>`).join('')
-        : '<option value="">No hay libros disponibles</option>';
+        .sort((a, b) => a.title.localeCompare(b.title, 'es'));
+      loanBookSearch.placeholder = ALL_AVAILABLE_BOOKS.length
+        ? `Escribe título o autor (${ALL_AVAILABLE_BOOKS.length.toLocaleString('es-CO')} disponibles)…`
+        : 'No hay libros disponibles';
     } else {
-      loanBookSelect.innerHTML = '<option value="">No se pudieron cargar los libros</option>';
+      ALL_AVAILABLE_BOOKS = [];
+      loanBookSearch.placeholder = 'No se pudieron cargar los libros';
     }
 
     if (membersResult.status === 'fulfilled') {
-      const members = [...membersResult.value.data].sort((a, b) => a.first_name.localeCompare(b.first_name));
-      loanMemberSelect.innerHTML = members.length
-        ? members.map(m => `<option value="${m.id}">${escapeHtml(m.first_name)} ${escapeHtml(m.last_name)} — ${escapeHtml(m.document_type)} ${escapeHtml(m.document_number)}</option>`).join('')
-        : '<option value="">No hay afiliados registrados</option>';
+      ALL_MEMBERS = [...membersResult.value.data]
+        .sort((a, b) => a.first_name.localeCompare(b.first_name, 'es'));
+      loanMemberSearch.placeholder = ALL_MEMBERS.length
+        ? 'Escribe nombre o documento…'
+        : 'No hay afiliados registrados';
     } else {
-      loanMemberSelect.innerHTML = '<option value="">No se pudieron cargar los afiliados</option>';
+      ALL_MEMBERS = [];
+      loanMemberSearch.placeholder = 'No se pudieron cargar los afiliados';
     }
   }
 
   async function openLoanModal() {
     loanForm.reset();
     hideLoanFormError();
+    loanBookDropdown.hidden = true;
+    loanMemberDropdown.hidden = true;
     await populateLoanFormSelects();
     loanModal.hidden = false;
   }
 
   function closeLoanModal() {
+    loanBookDropdown.hidden = true;
+    loanMemberDropdown.hidden = true;
     loanModal.hidden = true;
   }
 
@@ -382,12 +608,12 @@
     e.preventDefault();
     hideLoanFormError();
 
-    const bookId = loanBookSelect.value;
-    const memberId = loanMemberSelect.value;
+    const bookId = loanBookHidden.value;
+    const memberId = loanMemberHidden.value;
     const dueDate = document.getElementById('loanDueDate').value;
 
     if (!bookId || !memberId || !dueDate) {
-      showLoanFormError('Selecciona el libro, el usuario y la fecha de devolución.');
+      showLoanFormError('Selecciona un libro y un usuario de la lista desplegable, y la fecha de devolución.');
       return;
     }
 
@@ -510,6 +736,7 @@
   async function init() {
     disableUnsupportedFilters();
     initFilters();
+    initPickerEvents();
 
     document.getElementById('addLoanBtn').addEventListener('click', openLoanModal);
     document.getElementById('loanModalClose').addEventListener('click', closeLoanModal);
