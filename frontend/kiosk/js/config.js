@@ -4,5 +4,5 @@
 // =====================================================================
 
 window.LIBRARY_API = {
-  baseUrl: 'https://library-alberto-gutierrez-botero.onrender.com/api/v1'
+  baseUrl: 'https://biblioteca-alberto-gutierrez-botero.onrender.com/api/v1'
 };
