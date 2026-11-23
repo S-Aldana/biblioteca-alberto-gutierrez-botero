@@ -37,6 +37,8 @@
   let ALL_MEMBERS = [];
   let currentActiveLetter = '';
 
+  let scrollRafId = null;
+
   /* ============ API — apiFetch agrega el token y parsea errores ============ */
 
   const api = {
@@ -493,20 +495,25 @@
     });
   }
 
+
   function initPickerEvents() {
     loanBookList.addEventListener('scroll', () => {
-      const sections = loanBookList.querySelectorAll('.book-dict-section');
-      const containerTop = loanBookList.getBoundingClientRect().top;
-      let active = null;
-      for (const sec of sections) {
-        if (sec.getBoundingClientRect().top - containerTop <= 28) {
-          active = sec.dataset.letter;
-        } else {
-          break;
+      if (scrollRafId) return;
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = null;
+        const sections = loanBookList.querySelectorAll('.book-dict-section');
+        const containerTop = loanBookList.getBoundingClientRect().top;
+        let active = null;
+        for (const sec of sections) {
+          if (sec.getBoundingClientRect().top - containerTop <= 36) {
+            active = sec.dataset.letter;
+          } else {
+            break;
+          }
         }
-      }
-      if (active) setBubbleLetter(active);
-    });
+        if (active) setBubbleLetter(active);
+      });
+    }, { passive: true });
 
     loanBookSearch.addEventListener('focus', () => {
       loanBookDropdown.hidden = false;
